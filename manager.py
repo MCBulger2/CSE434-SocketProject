@@ -1,90 +1,130 @@
 import string
 from socket import *
-import ports
+import logging
+
+from utils import log_request
 from game import Game
 from player import Player
 
-managerPort = 4500
+# Global Variables for Manager
+managerPort = 4500  # manager has first 5 ports of range reserved
+manager_socket = None  # socket used for incoming/outgoing messages
 
-players = []
-games = []
+players = []  # list of all registered clients
+games = []  # list of all ongoing games
+
+logger = logging.getLogger()  # get logger with currently defined logging level (from main)
 
 
+# Entry point for Manager process - Starts the manager process.
+# Binds the current process to the server port, and indefinitely responds
+# to any requests that are written to that socket
 def start_manager() -> None:
-    print("The manager is starting...")
+    global manager_socket
+
+    # Open the socket
+    logger.info("The manager is starting...")
     manager_socket = socket(AF_INET, SOCK_DGRAM)
     manager_socket.bind(("", managerPort))
-    print(f"The manager is listening at port {str(managerPort)}.")
+    logger.info(f"The manager is listening at port {str(managerPort)}.")
 
+    # Listen for requests and respond to them
     while True:
-        request, client_addr = manager_socket.recvfrom(2048)
-        print(f"Received a request from {client_addr}")
-        message = request.decode()
-
-        response = ""
-        tokens = message.split(" ")
-        if len(tokens) == 3 and tokens[0] == "register":
-            response = register(tokens[1], client_addr[0], tokens[2])
-        elif len(tokens) == 2 and f"{tokens[0]} {tokens[1]}" == "query players":
-            response = query_players()
-        elif len(tokens) == 4 and f"{tokens[0]} {tokens[1]}" == "start game":
-            response = start_game(tokens[2], tokens[3])
-        elif len(tokens) == 2 and f"{tokens[0]} {tokens[1]}" == "query games":
-            response = query_games()
-        elif len(tokens) == 3 and tokens[0] == "end":
-            response = end(tokens[1], tokens[2])
-        elif len(tokens) == 2 and tokens[0] == "de-register":
-            response = deregister(tokens[1])
-        else:
-            response = "SYNTAX_ERROR"
-
-        manager_socket.sendto(response.encode(), client_addr)
+        handle_next_request()
 
     manager_socket.close()
 
 
-def register(user, address, port) -> string:
-    newPlayer = Player(user, address, port)
+def handle_next_request():
+    global manager_socket
 
+    # Get the next incoming message from the socket
+    request, client_addr = manager_socket.recvfrom(2048)
+    message = request.decode()  # bytes -> string
+
+    # Parse command from the request and execute the corresponding function
+    response = ""
+    tokens = message.split(" ")
+    if len(tokens) == 3 and tokens[0] == "register":
+        response = register(tokens[1], client_addr[0], tokens[2])
+    elif len(tokens) == 2 and f"{tokens[0]} {tokens[1]}" == "query players":
+        response = query_players()
+    elif len(tokens) == 4 and f"{tokens[0]} {tokens[1]}" == "start game":
+        response = start_game(tokens[2], tokens[3])
+    elif len(tokens) == 2 and f"{tokens[0]} {tokens[1]}" == "query games":
+        response = query_games()
+    elif len(tokens) == 3 and tokens[0] == "end":
+        response = end(tokens[1], tokens[2])
+    elif len(tokens) == 2 and tokens[0] == "de-register" or tokens[0] == "deregister":
+        response = deregister(tokens[1])
+    else: # the command was unrecognized, return an error as the response
+        response = "SYNTAX_ERROR"
+
+    log_request(client_addr, message, response) # log the request/response to the console
+    manager_socket.sendto(response.encode(), client_addr) # send the response back to the client
+
+
+# Register a client into the player database.
+# Attempts to associate a given username with their IP address and port
+# Both username and port must be unique.
+def register(username, address, port) -> string:
+    new_player = Player(username, address, port)
+
+    # Validate that the username and port are unique (not already registered by another user)
+    # If the username is invalid, the client should retry the registration with a different username.
+    # If the port is taken, the client should automatically retry with the same username but different port block.
     for player in players:
-        if player.port == newPlayer.port:
+        if player.port == new_player.port:
             return "FAILURE PORT"
-        elif player.name == newPlayer.name:
+        elif player.name == new_player.name:
             return "FAILURE USERNAME"
 
-    players.append(newPlayer)
+    # Username and port were valid, register user in the database
+    players.append(new_player)
 
     return "SUCCESS"
 
 
+# Returns the number of registered players, along with each of their usernames, IP addresses, and ports.
 def query_players() -> string:
     response = f"{len(players)}"
     if len(players) > 0:
         for player in players:
             response += f"\n{player.to_string()}"
-    print(response)
+
     return response
 
 
+# Invoked by the dealer player to start a new game with 1 <= k <= 3 additional players.
+# If there are enough players ready, creates a new game and returns a list of the other players back to the dealer.
+# If there are not enough players ready, or the dealer specified an invalid number of additional players, the request fails.
 def start_game(user, k_str) -> string:
+    # Check to see if k is within the valid domain of [1, 3]
     k = int(k_str)
     if k < 1 or k > 3 or len(players) < k:  # additional users out of range
         return "FAILURE"
 
-    gamePlayers = []
+    # Matchmaking: Randomly assign k of the players who are not currently in a game to the game
+    # todo: randomly assign players to the new game
+    # todo: check that the players are not already in a game
+    game_players = []
     for i in range(k):
-        gamePlayers.append(players[i])
-    newGameId = len(games)
-    newGame = Game(newGameId, user, gamePlayers)
-    games.append(newGame)
+        game_players.append(players[i])
 
-    response = f"SUCCESS\n{newGameId}"
+    # Register the new game in the database
+    new_game_id = len(games)
+    new_game = Game(new_game_id, user, game_players)
+    games.append(new_game)
+
+    # Form the response to return to the dealer (which includes each of the users that we assigned to the game)
+    response = f"SUCCESS\n{new_game_id}"
     for i in range(k):
-        response += f"\n({gamePlayers[i].to_string()})"
+        response += f"\n({game_players[i].to_string()})"
 
     return response
 
 
+# Returns a list of all ongoing games (as well as how many games are ongoing).
 def query_games() -> string:
     response = f"{str(len(games))}"
     if len(games) > 0:
@@ -93,21 +133,32 @@ def query_games() -> string:
     return response
 
 
-def end(gameId_str, user) -> string:
-    gameId = int(gameId_str)
+# Invoked by the dealer of a game when it is completed.
+# Removes the game from the list of ongoing games, and frees the users of the game to join a new game.
+def end(game_id_str, user) -> string:
+    # Find the game in the db where the invoking user is the dealer and the game id matches
+    game_id = int(game_id_str)
     game = -1
     for i in range(len(games)):
-        if games[i].gameId == gameId and games[i].dealer == user:
+        if games[i].gameId == game_id and games[i].dealer == user:
             game = i
 
+    # If there was a matching game, end it
     if game != -1:
         del games[game]
         return "SUCCESS"
 
+    # There was not a matching game, either the wrong user invoked the command or the game id was not found
     return "FAILURE"
 
 
+# Invoked by a client to remove themselves from the player list, and allow them to safely exit.
+# If a client exits without de-registering, they could be assigned to a new game, causing the peers to
+# be unable to communicate with them and unable to make progress.
+# Can only be invoked by a client who is not currently in an ongoing game.
 def deregister(username) -> string:
+    # todo check that the user is not in an ongoing game
+
     idx = -1
     for i in range(len(players)):
         if players[i].name == username:

@@ -1,0 +1,13 @@
+assign player [gameId] [numPlayers] [list of players]
+
+deal card [card]
+
+move card [src] [dest]
+
+reveal card [src]
+
+draw card [stock|discard]
+
+swap card [src]
+
+
