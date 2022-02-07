@@ -78,10 +78,7 @@ def start_game(user, k_str) -> string:
     newGame = Game(newGameId, user, gamePlayers)
     games.append(newGame)
 
-    response = f"""
-    SUCCESS
-    {newGameId}
-    """
+    response = f"SUCCESS\n{newGameId}"
     for i in range(k):
         response += f"\n({gamePlayers[i].to_string()})"
 
@@ -89,10 +86,15 @@ def start_game(user, k_str) -> string:
 
 
 def query_games() -> string:
-    return "SUCCESS"
+    response = f"{str(len(games))}"
+    if len(games) > 0:
+        for game in games:
+            response += f"\n{game.to_string()}"
+    return response
 
 
-def end(gameId, user) -> string:
+def end(gameId_str, user) -> string:
+    gameId = int(gameId_str)
     game = -1
     for i in range(len(games)):
         if games[i].gameId == gameId and games[i].dealer == user:
@@ -105,5 +107,15 @@ def end(gameId, user) -> string:
     return "FAILURE"
 
 
-def deregister(user) -> string:
-    return "SUCCESS"
+def deregister(username) -> string:
+    idx = -1
+    for i in range(len(players)):
+        if players[i].name == username:
+            idx = i
+            break
+
+    if idx != -1:
+        del players[idx]
+        return "SUCCESS"
+
+    return "FAILURE"

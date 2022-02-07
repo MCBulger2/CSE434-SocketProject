@@ -24,6 +24,6 @@ def get_next_port():
         print("Out of ports")
         exit(1)
 
-    portsAllocated += 1
+    portsAllocated += 5  # allocate 5 ports per client
     return next_port
 
