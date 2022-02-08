@@ -111,7 +111,8 @@ def wait_for_cards(id):
             print('got card ' + card.to_string())
             i += 1
     print_cards()
-    wait_for_stick_pass()
+    #wait_for_stick_pass()
+    wait_for_reveal_announcement(0)
 
 
 def wait_for_stick_pass():
@@ -131,19 +132,36 @@ def wait_for_stick_pass():
         else:
             wait_for_player(0)
 
+def wait_for_reveal_announcement(id):
+    print("waiting for reveal announcement")
+    request, client_addr = peer_socket.recvfrom(2048)
+    message = request.decode()
+    if message.startswith("announce initial reveal"):
+        peer_socket.sendto(f"ack {message}".encode(), client_addr)
+
+        x = threading.Thread(target=listen_for_revelations, args=(1,))
+        x.start()
+
+        card1 = int(input("Card 1: "))
+        reveal_card(card1)
+        card2 = int(input("Card 2: "))
+        reveal_card(card2)
+    wait_for_player(0)
+
+def listen_for_revelations(id):
+    while True:
+        request, client_addr = peer_socket.recvfrom(2048)
+        message = request.decode()
+        if message.startswith("reveal card"):
+            peer_socket.sendto(f"ack {message}".encode(), client_addr)
+            tokens = message.split("\n")
+            tokens = tokens[1:]
+            cards[tokens[1]][int(tokens[0])].hidden = False
+            print_cards()
 
 def wait_for_player(id):
     print("waiting for player")
-    request, client_addr = peer_socket.recvfrom(2048)
-    message = request.decode()
-    if message.startswith("reveal card"):
-        peer_socket.sendto(f"ack {message}".encode(), client_addr)
-        tokens = message.split("\n")
-        tokens = tokens[1:]
-        cards[tokens[1]][int(tokens[0])].hidden = False
-        print("received reveal card")
 
-    print_cards()
     wait_for_stick_pass()
     return
 
@@ -158,7 +176,10 @@ def print_cards():
     for player in cards:
         print(f"{player}:")
         for card in cards[player]:
-            print(f"{card.to_string()} ")
+            if (card.hidden):
+                print(f"***")
+            else:
+                print(f"{card.to_string()} ")
 
 
 # Executed on a thread separate from the main thread.
@@ -196,14 +217,41 @@ def request_start_game(num_players):
         x.start()
 
         assign_players()
-        print("done assigning")
+        #print("done assigning")
 
-        print("here")
         deal_cards()
-        print("done dealing")
+        #print("done dealing")
 
-        print("pass stick")
-        pass_talking_stick()
+        #print("pass stick")
+        #pass_talking_stick()
+
+        #print("announce initial reveal")
+        announce_initial_reveal()
+        wait_for_initial_reveal_completion()
+
+
+def wait_for_initial_reveal_completion():
+    # todo after this method, pass the talking stick to the next player so they can make a move
+    revealedCards = 0
+    while revealedCards < len(players) * 2:
+        request, client_addr = peer_socket.recvfrom(2048)
+        message = request.decode()
+        if message.startswith("reveal card"):
+            peer_socket.sendto(f"ack {message}".encode(), client_addr)
+            revealedCards += 1
+
+
+def sendToAll(bytes, soc, callback):
+    for player in players:
+        soc.sendto(bytes, (player.address, int(player.port)))
+        response, server_addr = soc.recvfrom(2048)
+        callback(response)
+
+
+def announce_initial_reveal():
+    for player in players:
+        dealer_socket.sendto("announce initial reveal".encode(), (player.address, int(player.port)))
+        response, server_addr = dealer_socket.recvfrom(2048)
 
 
 def pass_talking_stick():
