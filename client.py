@@ -2,6 +2,7 @@ from socket import *
 import threading
 
 from player import Player
+from card import Card
 
 # Global Variables for Client
 serverName = 'localhost'  # static, permanent IP of the manager process
@@ -26,7 +27,7 @@ cards = {}
 #   - Joins matchmaking, and waits to be assigned to a game
 #   - Starts a new game, and contacts the other peers assigned to the new game
 def start_client() -> None:
-    global manager_socket, peer_socket, clientPort, username
+    global manager_socket, peer_socket, dealer_socket, clientPort, username
 
     # Open a socket on a random dynamic port to communicate with the manager
     manager_socket = socket(AF_INET, SOCK_DGRAM)
@@ -49,6 +50,9 @@ def start_client() -> None:
     # Now that we're registered with the server, open a socket on the port(s) we were assigned to communicate with peers
     peer_socket = socket(AF_INET, SOCK_DGRAM)
     peer_socket.bind(("", clientPort))
+
+    dealer_socket = socket(AF_INET, SOCK_DGRAM)
+    dealer_socket.bind(("", clientPort + 1))
 
     # Start a thread that is responsible for listening to incoming requests
     # Without a second thread, the client UI would be unresponsive whenever we're waiting for a response
@@ -102,17 +106,59 @@ def wait_for_cards(id):
             peer_socket.sendto(f"ack {message}".encode(), client_addr)
             tokens = message.split("\n")
             tokens = tokens[1:]
-            cards[tokens[1]].append(tokens[0])
-            print('got card ' + tokens[1])
+            card = Card.from_string(tokens[0])
+            cards[tokens[1]].append(card)
+            print('got card ' + card.to_string())
             i += 1
     print_cards()
+    wait_for_stick_pass()
+
+
+def wait_for_stick_pass():
+    request, client_addr = peer_socket.recvfrom(2048)
+    message = request.decode()
+    if message.startswith("pass stick"):
+        peer_socket.sendto(f"ack {message}".encode(), client_addr)
+        nextPlayer = players[0]
+        del players[0]
+        players.append(nextPlayer)
+        if nextPlayer.name == username:
+            x = threading.Thread(target=wait_for_player, args=(1, ))
+            x.start()
+            make_move()
+            # x.join()
+            pass_talking_stick()
+        else:
+            wait_for_player(0)
+
+
+def wait_for_player(id):
+    print("waiting for player")
+    request, client_addr = peer_socket.recvfrom(2048)
+    message = request.decode()
+    if message.startswith("reveal card"):
+        peer_socket.sendto(f"ack {message}".encode(), client_addr)
+        tokens = message.split("\n")
+        tokens = tokens[1:]
+        cards[tokens[1]][int(tokens[0])].hidden = False
+        print("received reveal card")
+
+    print_cards()
+    wait_for_stick_pass()
+    return
+
+
+def make_move():
+    input("Selection: (currently will flip)")
+    reveal_card(0)
+    return
 
 
 def print_cards():
     for player in cards:
         print(f"{player}:")
         for card in cards[player]:
-            print(f"{card} ")
+            print(f"{card.to_string()} ")
 
 
 # Executed on a thread separate from the main thread.
@@ -145,9 +191,6 @@ def request_start_game(num_players):
             players.append(newPlayer)
             cards[newPlayer.name] = []
 
-        dealer_socket = socket(AF_INET, SOCK_DGRAM)
-        dealer_socket.bind(("", clientPort + 1))
-
         # spawn thread that will play the game on behalf of the dealer so the dealer main thread can do other stuff
         x = threading.Thread(target=matchmaking, args=(1,))
         x.start()
@@ -159,6 +202,21 @@ def request_start_game(num_players):
         deal_cards()
         print("done dealing")
 
+        print("pass stick")
+        pass_talking_stick()
+
+
+def pass_talking_stick():
+    nextPlayer = players[0]
+    print("passing the talking stick now")
+    for player in players:
+        #if (player.name != username):
+        dealer_socket.sendto(f"pass stick {nextPlayer.name}".encode(), (player.address, int(player.port)))
+        response, server_addr = dealer_socket.recvfrom(2048)
+
+    #del player[0]
+    #players.append(nextPlayer)
+
 
 # Generates a deck of cards, and shuffles them into a random order.
 # Invoked by the dealer at the start of every game.
@@ -167,7 +225,7 @@ def shuffle_cards():
     all_cards = []
     for suit in suits:
         for value in values:
-            all_cards.append(suit + value)
+            all_cards.append(Card(suit + value))
 
     return all_cards
 
@@ -190,9 +248,9 @@ def assign_players():
 # Notifies all other players that the player is being dealt a card of value 'card'.
 def deal_card(player, card):
     #  todo notify all players that a specific card is being dealt to a specific player
-    print("deal card " + card + player.name + str(player.port) )
+    print("deal card " + card.to_string() + player.name + str(player.port))
     for p in players:
-        dealer_socket.sendto(f"deal card\n{card}\n{player.name}".encode(), (p.address, p.port))
+        dealer_socket.sendto(f"deal card\n{card.to_string()}\n{player.name}".encode(), (p.address, p.port))
         response, server_addr = dealer_socket.recvfrom(2048)
     return
 
@@ -219,9 +277,14 @@ def move_card(src, dest, players):
 
 
 # Notifies all other players that this client is turning over a card in their stack.
-def reveal_card(src, card, players):
+def reveal_card(src):
     #  notify all other players that this client is revealing a certain card
-    return
+    cards[username][src].hidden = False
+
+    for player in players:
+        print("reveal" + str(src))
+        dealer_socket.sendto(f"reveal card\n{src}\n{username}".encode(), (player.address, int(player.port)))
+        response, server_addr = dealer_socket.recvfrom(2048)
 
 
 # Notifies all other players that this client is swapping the card in their hand with one of their six cards.
