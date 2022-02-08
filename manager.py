@@ -67,7 +67,7 @@ def handle_next_request():
 # Register a client into the player database.
 # Attempts to associate a given username with their IP address and port
 # Both username and port must be unique.
-def register(username, address, port) -> string:
+def register(username, address, port):
     new_player = Player(username, address, port)
 
     # Validate that the username and port are unique (not already registered by another user)
@@ -108,8 +108,16 @@ def start_game(user, k_str) -> string:
     # todo: randomly assign players to the new game
     # todo: check that the players are not already in a game
     game_players = []
-    for i in range(k):
-        game_players.append(players[i])
+    i = 0
+    while len(game_players) < k:
+        if players[i].name != user:
+            game_players.append(players[i])
+        i += 1
+
+    # Add dealer to list of players
+    for player in players:
+        if player.name == user:
+            game_players.append(player)
 
     # Register the new game in the database
     new_game_id = len(games)
@@ -118,7 +126,7 @@ def start_game(user, k_str) -> string:
 
     # Form the response to return to the dealer (which includes each of the users that we assigned to the game)
     response = f"SUCCESS\n{new_game_id}"
-    for i in range(k):
+    for i in range(len(game_players)):
         response += f"\n({game_players[i].to_string()})"
 
     return response
@@ -156,7 +164,7 @@ def end(game_id_str, user) -> string:
 # If a client exits without de-registering, they could be assigned to a new game, causing the peers to
 # be unable to communicate with them and unable to make progress.
 # Can only be invoked by a client who is not currently in an ongoing game.
-def deregister(username) -> string:
+def deregister(username):
     # todo check that the user is not in an ongoing game
 
     idx = -1
