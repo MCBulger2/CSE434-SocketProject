@@ -1,5 +1,6 @@
 from socket import *
 import threading
+import copy
 
 from player import Player
 from card import Card
@@ -29,8 +30,8 @@ stacks = {
 }
 currentTurn = None
 held_card = None
-round = 1
-
+round_num = 1
+gameId = -1
 
 # Entry point for a Client Process - Starts the client.
 # Contacts the manager/server to register itself and either:
@@ -74,28 +75,40 @@ def start_client() -> None:
 
     print(f"The client is listening at port {str(clientPort)}.")
 
-    print("Options:")
-    print("1: Start a new game")
-    print("2: Join matchmaking (normal rules)")
-    print("3: Join matchmaking (special rules)")
-    selection = int(input("Choose an option: "))
+    while True:
+        print("------------------------------------------")
+        print("Options:")
+        print("1: Start a new game")
+        print("2: Join matchmaking (normal rules)")
+        print("3: Join matchmaking (special rules)")
+        print("4: Query Manager")
+        selection = int(input("Choose an option: "))
 
-    if selection == 1:
-        num_players = int(input("Input the number of additional players: "))
-        request_start_game(num_players)
-    elif selection == 2:
-        print("Waiting to be contacted by a dealer...")
-        matchmaking(0)
-    elif selection == 3:
-        print("Not implemented yet")
+        if selection == 1:
+            num_players = int(input("Input the number of additional players: "))
+            request_start_game(num_players)
+        elif selection == 2:
+            print("Waiting to be contacted by a dealer...")
+            matchmaking(0)
+        elif selection == 3:
+            print("Not implemented yet")
+        elif selection == 4:
+            query_manager()
 
-    manager_socket.close()
 
+def query_manager():
+    print("Type \'q\' to stop querying the manager.")
+    query = input(">>")
+    while query != "q":
+        response = send_message_manager(query)
+        print(response)
+        query = input(">>")
 
-def broadcast(bytes, soc, callback, notify_self=True):
-    for player in players:
+def broadcast(bytes, soc, callback, notify_self=True, port_offset=0):
+    players_copy = copy.deepcopy(players)
+    for player in players_copy:
         if notify_self or player.name != username:
-            soc.sendto(bytes, (player.address, player.port))
+            soc.sendto(bytes, (player.address, player.port + port_offset))
             request, client_addr = soc.recvfrom(2048)
             callback(request, client_addr)
 
@@ -114,13 +127,13 @@ def wait_for_command(command, soc):
 # Attempts to start a new game as the dealer.
 # If the server successfully finds other players to play with, contacts them in order to start playing the game
 def request_start_game(num_players):
-    global players, dealer_socket
+    global players, dealer_socket, gameId
 
     request = f"start game {username} {num_players}"
     response = send_message_manager(request)
     tokens = response.split("\n")
     if tokens[0] == "SUCCESS":
-        num_players = int(tokens[1])
+        gameId = int(tokens[1])
         tokens = tokens[2:]
         players = []
         for player in tokens:
@@ -142,6 +155,11 @@ def request_start_game(num_players):
         game_state_thread.start()
 
         wait_for_initial_reveal_completion()
+
+        game_state_thread.join()
+        dealer_player_thread.join()
+
+        send_message_manager(f"end {gameId} {username}")
 
 
 def matchmaking(id):
@@ -181,18 +199,18 @@ def wait_for_cards(id):
 
 
 def play_round():
-    global currentTurn
+    global currentTurn, round_num
 
     print("#################################")
-    print(f"     Round {round}")
+    print(f"     Round {round_num}")
     print("#################################")
 
-    tokens, sender = wait_for_command("game state", peer_socket)
+    tokens, sender = wait_for_command("game state", dealer_socket)
     if tokens[0] == "end":
         print(f"The winner is {tokens[1]}")
-        return
+        return True
 
-    tokens, sender = wait_for_command("pass stick", peer_socket)
+    #tokens, sender = wait_for_command("pass stick", peer_socket)
     nextPlayer = players[0]
     currentTurn = nextPlayer
     del players[0]
@@ -205,13 +223,15 @@ def play_round():
         replace_card()
 
         dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
-        request, client_addr = dealer_socket.recvfrom(2048)
+        #request, client_addr = dealer_socket.recvfrom(2048)
 
-        pass_talking_stick()
+        #pass_talking_stick()
     else:
         print(f"Waiting for {nextPlayer.name} to complete their turn.")
         listen_for_move()
 
+    round_num += 1
+    return False
 
 def listen_for_move():
     global held_card
@@ -252,7 +272,9 @@ def wait_for_reveal_announcement(id):
 
     x2.join()
 
-    wait_for_player(0)
+    game_complete = False
+    while not game_complete:
+            game_complete = play_round()
 
 
 def listen_for_revelations(id):
@@ -261,11 +283,6 @@ def listen_for_revelations(id):
         tokens, sender = wait_for_command("reveal card", peer_socket)
         cards[tokens[1]][int(tokens[0])].hidden = False
         cardReceived += 1
-
-
-def wait_for_player(id):
-    while True:
-        play_round()
 
 
 def pop_card():
@@ -352,16 +369,20 @@ def wait_for_initial_reveal_completion():
     print("All players have revealed their cards")
 
     dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
-    request, client_addr = dealer_socket.recvfrom(2048)
+    #request, client_addr = dealer_socket.recvfrom(2048)
 
-    print("Passing the talking stick")
-    pass_talking_stick()
+    #print("Passing the talking stick")
+    #pass_talking_stick()
 
 
 def wait_for_game_completion(id):
-    while True:
+    global game_state_socket
+
+    waitingForCompletion = True
+    while waitingForCompletion:
+        print("waiting for query")
         tokens, sender = wait_for_command("query game state", game_state_socket)
-        waitingForCompletion = True
+
         cards_revealed = 0
         player = ""
         for player_cards in cards:
@@ -398,7 +419,8 @@ def wait_for_game_completion(id):
         if not waitingForCompletion:
             response = f"end\n{winner}"
 
-        broadcast(f"game state\n{response}".encode(), game_state_socket, lambda response, client_addr: print(response))
+        print("broadcast game state")
+        broadcast(f"game state\n{response}".encode(), game_state_socket, lambda response, client_addr: print(str(client_addr[1]) + " " + response.decode()), True, 1)
 
 
 def announce_initial_reveal():
