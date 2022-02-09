@@ -135,7 +135,7 @@ def query_manager():
 # notify_self - Default true. If false, the message will not be sent to our own username/ports.
 # This is useful because we do not always have a second thread open listening for the reply,
 # so if we try to communicate with ourselves, we'll be blocked waiting for a reply that will never come.
-def broadcast(message_bytes, soc, callback, notify_self=True, port_offset=0):
+def broadcast(message_bytes, soc, callback=lambda x, y: x, notify_self=True, port_offset=0):
     players_copy = copy.deepcopy(players)
     for player in players_copy:  # send to all players in the game
         if notify_self or player.name != username:  # skip ourselves if the parameter is false
@@ -398,14 +398,14 @@ def pop_card():
 
         # Let everyone know which card we stole and which one we replaced it with
         broadcast(f"pop\nsteal\n{steal_username}\n{steal_card_index}\n{username}\n{replace_card_index}".encode(),
-                  peer_socket, lambda response, sender: print(f"{response}"),
+                  peer_socket,
                   notify_self=False)
         print_cards()
         return True  # by returning true we skip the second stage of the turn that would normally occur
 
     # If execution gets here, we're popping a card from one of the stacks (discard or stock)
     held_card = stacks[stack_type].pop()
-    broadcast(f"pop\n{stack_type}".encode(), peer_socket, lambda response, sender: print(f"{response}"),
+    broadcast(f"pop\n{stack_type}".encode(), peer_socket,
               notify_self=False)
 
     print_cards()
@@ -434,9 +434,7 @@ def replace_card():
         stacks["discard"].append(swapped_card)
 
     held_card = None  # at the end of the turn, we shouldn't be holding anything
-    broadcast(f"replace\n{card_index_str}\n{username}".encode(), peer_socket,
-              lambda response, sender: print(f"{response}"),
-              notify_self=False)
+    broadcast(f"replace\n{card_index_str}\n{username}".encode(), peer_socket, notify_self=False)
 
 
 # Print out the cards each user has, as well as the top card of the discard, and other elements of the GUI.
@@ -484,8 +482,6 @@ def wait_for_initial_reveal_completion():
         if cards_revealed == 2 * len(players):  # expect 2 cards from each player to be revealed
             waiting_for_revelations = False
 
-    print("All players have revealed their cards")
-
     # Querying the game state (listener runs on another socket and thread in the dealer) kicks off a round
     # Normally this is done by the player whose turn it is, but since its no one's turn yet, the dealer must do it
     dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
@@ -500,7 +496,6 @@ def wait_for_game_completion(id):
     waiting_for_completion = True
     while waiting_for_completion:
         # Wait until someone queries this thread from the game state
-        print("waiting for query")
         tokens, sender = wait_for_command("query game state", game_state_socket)
 
         # Check if all players have revealed all six cards
@@ -543,15 +538,13 @@ def wait_for_game_completion(id):
         if not waiting_for_completion: # if all cards have been revealed, let everyone know the game is over
             response = f"end\n{winner}"
 
-        broadcast(f"game state\n{response}".encode(), game_state_socket,
-                  lambda response, client_addr: print(str(client_addr[1]) + " " + response.decode()), True, 1)
+        broadcast(f"game state\n{response}".encode(), game_state_socket, lambda x, y: x, True, 1)
 
 
 # Announce to all players of the current game that they can start revealing two of their cards
 # Occurs at start of the game after cards have been dealt. Run by the dealer.
 def announce_initial_reveal():
-    broadcast("announce initial reveal".encode(), dealer_socket,
-              lambda response, sender: print(f"{sender[1]}: {response}"))
+    broadcast("announce initial reveal".encode(), dealer_socket)
 
 
 # Generates a deck of cards, and shuffles them into a random order.
@@ -574,15 +567,13 @@ def assign_players():
         players_str += f"\n{player.to_string()}"
 
     message = f"assign player\n{len(players)}{players_str}".encode()
-    broadcast(message, dealer_socket, lambda response, client_addr: print(response))
+    broadcast(message, dealer_socket)
 
 
 # Notifies all other players that the player is being dealt a card of value 'card'.
 # Run by the dealer.
 def deal_card(player, card):
-    print("deal card " + card.to_string() + player.name + str(player.port))
-    broadcast(f"deal card\n{card.to_string()}\n{player.name}".encode(), dealer_socket,
-              lambda response, sender: print(f"{response}"))
+    broadcast(f"deal card\n{card.to_string()}\n{player.name}".encode(), dealer_socket)
 
 
 # Distributes the appropriate number of random cards in a deck to each player of the current game.
@@ -604,13 +595,12 @@ def broadcast_stack(stack_type, stack_cards):
     card_str = ""
     for card in stack_cards:
         card_str += f"\n{card.to_string()}"
-    broadcast(f"stack\n{stack_type}{card_str}".encode(), dealer_socket, lambda response, sender: print(f"{response}"))
+    broadcast(f"stack\n{stack_type}{card_str}".encode(), dealer_socket)
 
 
 # Notifies all other players that this client is turning over a card in their stack.
 def reveal_card(src):
-    broadcast(f"reveal card\n{src}\n{username}".encode(), dealer_socket,
-              lambda response, sender: print(f"{sender[1]}: {response}"))
+    broadcast(f"reveal card\n{src}\n{username}".encode(), dealer_socket)
 
 
 # Requests input from the user, and converts the response to an integer.

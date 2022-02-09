@@ -31,7 +31,7 @@ def start_manager() -> None:
 
     # Listen for requests and respond to them
     try:
-        while True:
+        while True:  # Keep getting incoming request and respond to each of them
             handle_next_request()
     except KeyboardInterrupt:
         logger.info("Shutting down the manager...")
@@ -61,11 +61,11 @@ def handle_next_request():
         response = end(tokens[1], tokens[2])
     elif len(tokens) == 2 and tokens[0] == "de-register" or tokens[0] == "deregister":
         response = deregister(tokens[1])
-    else: # the command was unrecognized, return an error as the response
+    else:  # the command was unrecognized, return an error as the response
         response = "SYNTAX_ERROR"
 
-    log_request(client_addr, message, response) # log the request/response to the console
-    manager_socket.sendto(response.encode(), client_addr) # send the response back to the client
+    log_request(client_addr, message, response)  # log the request/response to the console
+    manager_socket.sendto(response.encode(), client_addr)  # send the response back to the client
 
 
 # Register a client into the player database.
@@ -101,7 +101,7 @@ def query_players() -> string:
 
 # Invoked by the dealer player to start a new game with 1 <= k <= 3 additional players.
 # If there are enough players ready, creates a new game and returns a list of the other players back to the dealer.
-# If there are not enough players ready, or the dealer specified an invalid number of additional players, the request fails.
+# If there are not enough players ready, or the dealer specified an invalid number of additional players, request fails.
 def start_game(user, k_str) -> string:
     # Check to see if k is within the valid domain of [1, 3]
     k = int(k_str)
@@ -109,8 +109,7 @@ def start_game(user, k_str) -> string:
         return "FAILURE"
 
     # Matchmaking: Randomly assign k of the players who are not currently in a game to the game
-    # todo: randomly assign players to the new game
-    # todo: check that the players are not already in a game
+    # todo: randomly assign players to the new game - currently sequential
     viable_players = []
     for p in players:
         player_in_game = False
@@ -125,26 +124,6 @@ def start_game(user, k_str) -> string:
         return "FAILURE"
 
     game_players = viable_players[0:k]
-
-    #game_players = []
-    #i = 0
-    #invalid_players = 0
-    #while len(game_players) < k:
-    #    if i >= len(players): # or (len(players) - invalid_players) > k:
-    #        return "FAILURE"
-
-
-
-        #if players[i].name != user:
-        #    for game in games:
-        #        for player in game.players:
-        #            player_in_game = False
-        #            if player.name == players[i].name:
-        #                #invalid_players += 1
-        #                i += 1
-        #                #break
-        #    game_players.append(players[i])
-        #i += 1
 
     # Add dealer to list of players
     for player in players:
