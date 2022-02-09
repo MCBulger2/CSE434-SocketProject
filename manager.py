@@ -27,10 +27,14 @@ def start_manager() -> None:
     manager_socket = socket(AF_INET, SOCK_DGRAM)
     manager_socket.bind(("", managerPort))
     logger.info(f"The manager is listening at port {str(managerPort)}.")
+    logger.info("To shut down the manager, press \'^C\' (Control + C).")
 
     # Listen for requests and respond to them
-    while True:
-        handle_next_request()
+    try:
+        while True:
+            handle_next_request()
+    except KeyboardInterrupt:
+        logger.info("Shutting down the manager...")
 
     manager_socket.close()
 
@@ -107,12 +111,40 @@ def start_game(user, k_str) -> string:
     # Matchmaking: Randomly assign k of the players who are not currently in a game to the game
     # todo: randomly assign players to the new game
     # todo: check that the players are not already in a game
-    game_players = []
-    i = 0
-    while len(game_players) < k:
-        if players[i].name != user:
-            game_players.append(players[i])
-        i += 1
+    viable_players = []
+    for p in players:
+        player_in_game = False
+        for game in games:
+            for player in game.players:
+                if player.name == p.name:
+                    player_in_game = True
+        if not player_in_game and p.name != user:
+            viable_players.append(p)
+
+    if len(viable_players) < k:
+        return "FAILURE"
+
+    game_players = viable_players[0:k]
+
+    #game_players = []
+    #i = 0
+    #invalid_players = 0
+    #while len(game_players) < k:
+    #    if i >= len(players): # or (len(players) - invalid_players) > k:
+    #        return "FAILURE"
+
+
+
+        #if players[i].name != user:
+        #    for game in games:
+        #        for player in game.players:
+        #            player_in_game = False
+        #            if player.name == players[i].name:
+        #                #invalid_players += 1
+        #                i += 1
+        #                #break
+        #    game_players.append(players[i])
+        #i += 1
 
     # Add dealer to list of players
     for player in players:

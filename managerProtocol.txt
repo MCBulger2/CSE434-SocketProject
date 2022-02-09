@@ -1,0 +1,61 @@
+This documents defines the communication protocol for communicating with the manager process.
+For all of the below requests and responses, a value in angle brackets ("<>") indicates a placeholder for a parameter in the message.
+
+Format of Messages
+
+Register Player:
+register <username> <port>
+    SUCCESS
+        User was successfully registered
+    FAILURE <error>
+        Where <error> is:
+            "PORT" - the <port> is already taken
+            "USERNAME" - the <username> is already taken
+
+Query Registered Players:
+query players
+    <num_players><players>
+
+    Players is a list of <player> separated by newlines, where a <player>
+    represents a player in the format:
+        \n(<username>, <IP Address>, <port>)
+
+Start Game:
+start game <username> <k>
+    FAILURE
+    SUCCESS\n<gameId>\n<players>
+
+Query ongoing games:
+query games
+    <num_games><games>
+    Games is a list of <game> separated by newlines, where a <game>
+    represents a game in the format:
+        \n(<gameId>, <dealerUsername>, [<players>])
+
+        Where <players> is a list of players separated by commas in the following format
+        (<username>, <IP Address>, <port>)
+
+End game:
+end <gameId> <username>
+    SUCCESS
+    FAILURE
+
+De-register:
+deregister or de-register
+    SUCCESS
+    FAILURE
+
+
+
+Order of Messages
+
+This protocol uses a "request-reply" format for communication. There is a single, manager with a well-known, static IP address and port (4500 by default), and an arbitrary number of client processes.
+The manager process listens for incoming messages from any of the clients and responds to them with the response defined above.
+No additional acknowledgement messages should be sent back to the manager on receipt of the response; any acknowledgement sent will be incorrectly interpreted as a query to execute.
+
+A client process does not need to be registered with the manager in order to make any of the above queries to the manager, excluding "Start Game" and "De-register".
+To start a new game via the manager, at least two "Register Player" requests must be made. Then, one of the registered players
+can send a "Start Game" request, which will assign as many players as specified to this new game. Using the response from this request, the querying player (who is now the dealer)
+is responsible for contacting the other players in the game, and playing the game with them.
+Upon completion of the game, the dealer should end the "End Game" request to allow all the clients to join a new game.
+When a client is done playing, they should send a "De-register" request to free the port(s) they were using, as well as their username

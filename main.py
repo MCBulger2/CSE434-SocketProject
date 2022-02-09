@@ -18,16 +18,19 @@ def main(argv):
 
     try:
         # Attempt to parse the command line arguments
-        opts, args = getopt.getopt(argv, "mv", ["manager", "verbose"])
+        opts, args = getopt.getopt(argv, "mvq", ["manager", "verbose", "query"])
     except getopt.GetoptError:
         # If parsing was unsuccessful, show the proper usage and exit
-        print("main.py -m")
+        print("main.py [-m|-q] -v")
         sys.exit(2)
 
     # Take the appropriate action for each command line argument
     for opt, arg in opts:
         if opt == "-m":
             manager.start_manager()
+            return
+        if opt == "-q":
+            client.query_manager()
             return
 
     # If not a manager, start up as a client process

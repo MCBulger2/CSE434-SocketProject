@@ -35,6 +35,15 @@ class Card:
 └──────┘"""
 
     @staticmethod
+    def empty_card_to_string():
+        return \
+            f"""┌─ ─ ─ ┐
+        
+│      │       
+       
+└ ─ ─ ─┘"""
+
+    @staticmethod
     def merge_lines(l1, l2):
         res = ""
         l1a = list(filter(lambda x: x != "", l1.split("\n")))
