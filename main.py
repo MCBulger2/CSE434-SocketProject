@@ -18,12 +18,13 @@ def main(argv):
 
     try:
         # Attempt to parse the command line arguments
-        opts, args = getopt.getopt(argv, "mvq", ["manager", "verbose", "query"])
+        opts, args = getopt.getopt(argv, "mvqp", ["manager", "verbose", "query", "pause"])
     except getopt.GetoptError:
         # If parsing was unsuccessful, show the proper usage and exit
-        print("main.py [-m|-q] -v")
+        print("main.py [-m|-q] -v -p")
         sys.exit(2)
 
+    pause = False
     # Take the appropriate action for each command line argument
     for opt, arg in opts:
         if opt == "-m":
@@ -33,14 +34,13 @@ def main(argv):
             try:
                 client.query_manager()
             except KeyboardInterrupt:
-            	print("Shutting down the client...")
-            return
+                print("Shutting down the client...")
+        if opt == "-p":
+            pause = True
 
     # If not a manager, start up as a client process
-    client.start_client()
+    client.start_client(pause)
 
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-
-

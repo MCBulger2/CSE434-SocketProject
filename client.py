@@ -1,4 +1,5 @@
 import random
+import time
 from socket import *
 import threading
 import copy
@@ -32,16 +33,21 @@ stacks = {  # game board continued, stores cards for the stock stack and discard
 }
 currentTurn = None  # which username's turn it is to make a move
 held_card = None  # the card being "held" by the current user (card involved with current move while in progress)
-round_num = 1  # the current round of the game
+round_num = 1  # the current turn of the round
+turn_num = 1  # the current turn of the round
 gameId = -1  # the game id assigned by the manager. This value is only used by the dealer to end the game
+play_with_extension = False
+pause = False
 
 
 # Entry point for a Client Process - Starts the client.
 # Contacts the manager/server to register itself and either:
 #   - Joins matchmaking, and waits to be assigned to a game
 #   - Starts a new game, and contacts the other peers assigned to the new game
-def start_client() -> None:
-    global manager_socket, peer_socket, dealer_socket, game_state_socket, clientPort, username, round_num
+def start_client(should_pause) -> None:
+    global manager_socket, peer_socket, dealer_socket, game_state_socket, clientPort, username, turn_num, round_num, players, cards, stacks, pause
+
+    pause = should_pause
 
     # Open a socket on a random dynamic port to communicate with the manager
     manager_socket = socket(AF_INET, SOCK_DGRAM)
@@ -62,29 +68,42 @@ def start_client() -> None:
 
     # Main menu, user will be dumped here at the start and after each game
     while True:
-        round_num = 1  # make sure round number is reset after each game
+        # reset all the global variables at the end of a game/before a new game starts
+        turn_num = 1
+        round_num = 1
+        players = []  # list of all other players in the current game (including this client's player interface)
+        cards = {}  # the game board, keys are player usernames, values are array of cards that user has
+        stacks = {  # game board continued, stores cards for the stock stack and discard stack
+            "stock": [],
+            "discard": []
+        }
 
         print("------------------------------------------")
         print("Options:")
         print("1: Start a new game")
         print("2: Join matchmaking (normal rules)")
-        print("3: Join matchmaking (special rules)")
-        print("4: Query Manager")
-        print("5: De-register and Exit")
+        # print("3: Join matchmaking (special rules)")
+        print("3: Query Manager")
+        print("4: De-register and Exit")
         selection = int_input("Choose an option: ", lambda x: x in [1, 2, 3, 4, 5])
 
         if selection == 1:  # Start game
             num_players = int_input("Input the number of additional players (between 1-3 inclusive): ",
                                     lambda x: x >= 1 and x <= 3)
-            request_start_game(num_players)
+            play_with_extension_input = input_validator("Would you like to play 'W'ith or with'O'ut the player extension (stealing)? (Enter W or O): ",
+                                    lambda x: x.lower() == "w" or x.lower() == "o")
+            extension = False
+            if play_with_extension_input == "w":
+                extension = True
+            request_start_game(num_players, extension)
         elif selection == 2:  # normal matchmaking
             print("Waiting to be contacted by a dealer...")
             matchmaking(0)
-        elif selection == 3:  # special matchmaking
-            print("Not implemented yet")
-        elif selection == 4:  # query manager console (for sending raw queries to the manager)
+        # elif selection == 3:  # special matchmaking
+        #     print("Not implemented yet")
+        elif selection == 3:  # query manager console (for sending raw queries to the manager)
             query_manager()
-        elif selection == 5:  # de-register and exit
+        elif selection == 4:  # de-register and exit
             response = send_message_manager(f"de-register {username}")
             print(response)
             exit(0)
@@ -139,12 +158,18 @@ def query_manager():
 # This is useful because we do not always have a second thread open listening for the reply,
 # so if we try to communicate with ourselves, we'll be blocked waiting for a reply that will never come.
 def broadcast(message_bytes, soc, callback=lambda x, y: x, notify_self=True, port_offset=0):
+    print(
+        f"******* {username} is starting to broadcast a message *******")
     players_copy = copy.deepcopy(players)
     for player in players_copy:  # send to all players in the game
         if notify_self or player.name != username:  # skip ourselves if the parameter is false
+            print(f"***** {username} is sending {player.name} ({player.address}, {player.port}) \"{message_bytes.decode()}\" *****")
             soc.sendto(message_bytes, (player.address, player.port + port_offset))  # broadcast message
             request, client_addr = soc.recvfrom(2048)  # wait for acknowledgement
+            print(
+                f"***** {username} received from {player.name} ({player.address}, {player.port}) \"{message_bytes.decode()}\" *****")
             callback(request, client_addr)  # take action on response
+    print(f"******* {username} is done broadcasting *******")
 
 
 # Listens to the specified socket for a command of a particular name.
@@ -152,18 +177,24 @@ def broadcast(message_bytes, soc, callback=lambda x, y: x, notify_self=True, por
 # These tokens (and the sender) are returned to the caller to take action on the command.
 def wait_for_command(command, soc):
     while True:
+        print(
+            f"***** {username} is waiting for the command \"{command}\" *****")
         request, sender = soc.recvfrom(2048)  # wait for command to come in
         message = request.decode()
+        print(
+            f"***** {username} received from ({sender[0]}, {sender[1]}) \"{message}\" *****")
         tokens = message.split("\n")  # split the message by newline; parameters will be on separate lines
         if tokens[0] == command:  # is the command we got the one we were expecting
             soc.sendto(f"ack {message}".encode(), sender)  # send acknowledgement of receipt
+            print(
+                f"***** {username} sent acknowledgement of \"{command}\" to ({sender[0]}, {sender[1]}) *****")
             tokens = tokens[1:]  # remove the command token, which is a given, leaving only the parameters array
             return tokens, sender
 
 
 # Attempts to start a new game as the dealer.
 # If the server successfully finds other players to play with, contacts them in order to start playing the game
-def request_start_game(num_players):
+def request_start_game(num_players, extension):
     global players, dealer_socket, gameId
 
     # Send a message to the manager indicating we're ready to start a new game
@@ -185,21 +216,28 @@ def request_start_game(num_players):
         dealer_player_thread = threading.Thread(target=matchmaking, args=(1,))
         dealer_player_thread.start()
 
-        assign_players()  # notify all the other players that the game is starting
-        deal_cards()  # shuffle the deck, and distribute the cards to all players
-        announce_initial_reveal()  # once all players have gotten their cards, everyone needs to reveal 2 cards
+        assign_players(play_with_extension)  # notify all the other players that the game is starting
 
-        # spawn thread that will check the state of the game at the end of each round to see if there was a winner
-        game_state_thread = threading.Thread(target=wait_for_game_completion, args=(1,))
-        game_state_thread.start()
+        continue_game = True
+        while continue_game:
+            deal_cards()  # shuffle the deck, and distribute the cards to all players
+            announce_initial_reveal()  # once all players have gotten their cards, everyone needs to reveal 2 cards
 
-        wait_for_initial_reveal_completion()  # wait for all players to reveal 2 cards before kicking off round 1
+            # spawn thread that will check the state of the game at the end of each round to see if there was a winner
+            game_state_thread = threading.Thread(target=wait_for_game_completion, args=(1,))
+            game_state_thread.start()
 
-        # game setup is complete, wait for the threads to end, indicating the game is over
-        game_state_thread.join()
+            wait_for_initial_reveal_completion()  # wait for all players to reveal 2 cards before kicking off round 1
+
+            # game setup is complete, wait for the threads to end, indicating the game is over
+            game_state_thread.join()
+            time.sleep(1)
+            continue_game = round_num <= 9
+
         dealer_player_thread.join()
 
         # once the game is over, notify the manager so each player can join another game
+        print("Informing manager the game has ended...")
         send_message_manager(f"end {gameId} {username}")
     else:
         print("There are not enough players in matchmaking right now, try again later.")
@@ -207,10 +245,14 @@ def request_start_game(num_players):
 
 # Wait to be contacted by the dealer of a new game. The manager will provide the dealer our address and port.
 def matchmaking(id):
-    global players, cards, dealer_address
+    global players, cards, dealer_address, play_with_extension
 
     tokens, sender = wait_for_command("assign player", peer_socket)
-    tokens = tokens[1:]
+    play_with_extension_str = tokens[0]
+    play_with_extension = False
+    if play_with_extension_str == "True":
+        play_with_extension = True
+    tokens = tokens[2:]
     # Now that we have been assigned to a game, load all the other players from the message
     players = []
     for player in tokens:
@@ -229,36 +271,64 @@ def matchmaking(id):
 # Wait for the dealer to shuffle the deck and start sending us cards.
 # This also keeps track of cards dealt to the other players, so that we can print out their game boards on our end.
 def wait_for_cards(id):
-    # Expect 6 cards for each player in the game
-    i = 0
-    while i < len(players) * 6:
-        tokens, sender = wait_for_command("deal card", peer_socket)
-        card = Card.from_string(tokens[0])
-        cards[tokens[1]].append(card)  # deal the card to the player it was assigned to
-        i += 1
+    global cards, stacks
 
-    # Expect the stockpile and discard pile
-    stacks["stock"] = []
-    stacks["discard"] = []
-    tokens, sender = wait_for_command("stack", peer_socket)
-    stack_type = tokens[0]
-    tokens = tokens[1:]
-    for card in tokens:
-        new_card = Card.from_string(card)
-        stacks[stack_type].append(new_card)
+    while round_num <= 9:
+        # reset deck at start of every round
+        for user in cards.keys():
+            cards[user] = []
+        stacks = {
+            "stock": [],
+            "discard": []
+        }
 
-    # Now that we have all the cards for all the players, we can print the game board
-    print_cards()
-    wait_for_reveal_announcement(0)
+        # Expect 6 cards for each player in the game
+        i = 0
+        while i < len(players) * 6:
+            tokens, sender = wait_for_command("deal card", peer_socket)
+            card = Card.from_string(tokens[0])
+            card.hidden = True # todo maybe don't need this
+            cards[tokens[1]].append(card)  # deal the card to the player it was assigned to
+            i += 1
+
+        # Expect the stockpile and discard pile
+        stacks["stock"] = []
+        stacks["discard"] = []
+        tokens, sender = wait_for_command("stack", peer_socket)
+        stack_type = tokens[0]
+        tokens = tokens[1:]
+        for card in tokens:
+            new_card = Card.from_string(card)
+            stacks[stack_type].append(new_card)
+
+        # Now that we have all the cards for all the players, we can print the game board
+        print("Initial Deal:")
+        print_cards()
+
+        if pause:
+            input("Press enter to continue...")
+        wait_for_reveal_announcement(0)
 
 
 def play_round():
-    global currentTurn, round_num
+    global currentTurn, turn_num, round_num
 
     tokens, sender = wait_for_command("game state", dealer_socket)
-    if tokens[0] == "end":
+    if tokens[0] == "newround":
         print("#################################")
-        print(f" End of Game (Total Rounds: {round_num - 1})")
+        print(f" End of Round {round_num}")
+        print("#################################")
+        print_cards(players_only=True)
+        print("Current Player Scores:")
+        (scores, _) = tally_scores()
+        for user in scores.keys():
+            print(f"\t{user}: {scores[user]}")
+        round_num += 1
+        turn_num = 1
+        return True, False
+    elif tokens[0] == "end":
+        print("#################################")
+        print(f" End of Game (Total Rounds: {round_num})")
         print("#################################")
         print_cards(players_only=True)
         print(f"The winner is {tokens[1]}!!!")
@@ -266,21 +336,27 @@ def play_round():
         (scores, _) = tally_scores()
         for user in scores.keys():
             print(f"\t{user}: {scores[user]}")
-
-        return True
+        round_num += 1
+        return True, True
 
     print("#################################")
-    print(f"     Round {round_num}")
+    print(f"  Round {round_num} - Turn {turn_num}")
     print("#################################")
+
+    if len(stacks["stock"]) == 0:
+        stacks["stock"] = list(reversed(stacks["discard"]))
+        for card in stacks["stock"]:
+            card.hidden = True
+        stacks["discard"] = []
 
     # tokens, sender = wait_for_command("pass stick", peer_socket)
-    nextPlayer = players[0]
-    currentTurn = nextPlayer
+    next_player = players[0]
+    currentTurn = next_player
     del players[0]
-    players.append(nextPlayer)
+    players.append(next_player)
 
     print_cards()
-    if nextPlayer.name == username:
+    if next_player.name == username:
         print(f"It's my turn")
         skip_replace = pop_card()
         if not skip_replace:
@@ -289,11 +365,11 @@ def play_round():
         dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
         # request, client_addr = dealer_socket.recvfrom(2048)
     else:
-        print(f"Waiting for {nextPlayer.name} to complete their turn.")
+        print(f"Waiting for {next_player.name} to complete their turn.")
         listen_for_move()
 
-    round_num += 1
-    return False
+    turn_num += 1
+    return False, False
 
 
 def listen_for_move():
@@ -364,8 +440,9 @@ def wait_for_reveal_announcement(id):
 
     # Start actually playing the game, taking turns making moves until someone wins
     game_complete = False
-    while not game_complete:
-        game_complete = play_round()
+    round_complete = False
+    while not game_complete and not round_complete:
+        (round_complete, game_complete) = play_round()
 
 
 # Listen for broadcasts made by other players that indicate which cards they are revealing
@@ -383,7 +460,7 @@ def listen_for_revelations(id):
 # Broadcast to all other players that we have popped a card from the stock or discard,
 # or we have stolen a card from another player.
 def pop_card():
-    global held_card
+    global held_card, play_with_extension
     valid_stacks = [1]
     print("------------Get Net Card---------------")
     print("Where do you want to draw a card from?")
@@ -394,11 +471,12 @@ def pop_card():
     else:
         print("2. (You cannot draw from the discard because it is empty.)")
 
-    if all(not card.hidden for card in cards[username]):
-        print("2. (You cannot steal from another player because you have no hidden cards.)")
-    else:
-        valid_stacks.append(3)
-        print("3. Steal from another player")
+    if play_with_extension:
+        if all(not card.hidden for card in cards[username]):
+            print("2. (You cannot steal from another player because you have no hidden cards.)")
+        else:
+            valid_stacks.append(3)
+            print("3. Steal from another player")
 
     # selection = int_input("Selection: ", lambda x: x in valid_stacks)
     # randomly choose one of the valid options
@@ -610,9 +688,11 @@ def wait_for_game_completion(id):
 
         (scores, winner) = tally_scores()
 
-        response = "continue"
-        if not waiting_for_completion:  # if all cards have been revealed, let everyone know the game is over
+        response = "continue"  # continue means the round is not over yet
+        if not waiting_for_completion and round_num == 9:  # end game after 9 rounds are played
             response = f"end\n{winner}"
+        if not waiting_for_completion and round_num < 9:  # start new round if <9 rounds have been played
+            response = f"newround"
 
         broadcast(f"game state\n{response}".encode(), game_state_socket, lambda x, y: x, True, 1)
 
@@ -658,13 +738,13 @@ def generate_deck():
 
 
 # Called by the dealer to notify the other players of the game that they have been assigned to a new game
-def assign_players():
+def assign_players(play_with_extension):
     # Generate the string that consists of a list of all the players
     players_str = ""
     for player in players:
         players_str += f"\n{player.to_string()}"
 
-    message = f"assign player\n{len(players)}{players_str}".encode()
+    message = f"assign player\n{play_with_extension}\n{len(players)}{players_str}".encode()
     broadcast(message, dealer_socket)
 
 

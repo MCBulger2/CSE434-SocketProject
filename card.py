@@ -62,15 +62,16 @@ class Card:
             header += "\n"
 
             result = ""
-            for i in r:
-                new_card_str = deck[i].player_card_to_string()
-                if len(result) > 0:
-                    result = Card.merge_lines(result, new_card_str)
-                else:
-                    result = new_card_str
-            result.replace(";n;", "\n")
-            result = header + result
-            final_result += result
+            if len(deck) == 6:
+                for i in r:
+                    new_card_str = deck[i].player_card_to_string()
+                    if len(result) > 0:
+                        result = Card.merge_lines(result, new_card_str)
+                    else:
+                        result = new_card_str
+                result.replace(";n;", "\n")
+                result = header + result
+                final_result += result
 
         return final_result
 
