@@ -542,6 +542,20 @@ def wait_for_initial_reveal_completion():
     # Normally this is done by the player whose turn it is, but since its no one's turn yet, the dealer must do it
     dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
 
+def score_card(card):
+    value = card.value[1:]
+    # Map special card values to their real value
+    if value == "A":  # Ace
+        value = 1
+    elif value == "2":  # '2' scores -2
+        value = -2
+    elif value == "J" or value == "Q":  # Jack or Queen score 10
+        value = 10
+    elif value == "K":  # King scores 0
+        value = 0
+    else:  # 3-10 are scored by face value
+        value = int(value)
+    return value
 
 # todo docs
 def tally_scores():
@@ -549,23 +563,23 @@ def tally_scores():
     winner = ""
     winner_score = 9999999  # players are competing for lowest score, so start with really high score for comparing
     for player in cards:
-        player_sum = 0
+        # If you get two equal cards in the same column, that column scores 0
+        correction = 0  # correction accounts for the special column scoring (subtract this from overall sum)
+        for i in range(0, 3):
+            top_card_value = cards[player][i].value[1:]
+            bottom_card_value = cards[player][i + 3].value[1:]
+            # If two cards in the same column match, add both of their values to the correction
+            if top_card_value == bottom_card_value: # todo maybe this needs to check by value so jack can match with queen
+                correction += score_card(cards[player][i]) + score_card(cards[player][i + 3])
+
         # add up the value of all the player's cards
+        player_sum = 0
         for card in cards[player]:
-            value = card.value[1:]
-            # Map special card values to their real value
-            if value == "A":  # Ace
-                value = 1
-            elif value == "J":  # Jack
-                value = 11
-            elif value == "Q":  # Queen
-                value = 12
-            elif value == "K":  # King
-                value = 13
-            else:  # If it's not a special card just use the face value
-                value = int(value)
+            value = score_card(card)
             player_sum += value
-        scores[player] = player_sum
+
+        scores[player] = player_sum - correction
+
         if player_sum < winner_score:  # does this player have a better score than the current winner?
             winner_score = player_sum
             winner = player
