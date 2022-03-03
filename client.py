@@ -1,3 +1,4 @@
+import random
 from socket import *
 import threading
 import copy
@@ -40,7 +41,7 @@ gameId = -1  # the game id assigned by the manager. This value is only used by t
 #   - Joins matchmaking, and waits to be assigned to a game
 #   - Starts a new game, and contacts the other peers assigned to the new game
 def start_client() -> None:
-    global manager_socket, peer_socket, dealer_socket, game_state_socket, clientPort, username
+    global manager_socket, peer_socket, dealer_socket, game_state_socket, clientPort, username, round_num
 
     # Open a socket on a random dynamic port to communicate with the manager
     manager_socket = socket(AF_INET, SOCK_DGRAM)
@@ -61,6 +62,8 @@ def start_client() -> None:
 
     # Main menu, user will be dumped here at the start and after each game
     while True:
+        round_num = 1  # make sure round number is reset after each game
+
         print("------------------------------------------")
         print("Options:")
         print("1: Start a new game")
@@ -252,14 +255,23 @@ def wait_for_cards(id):
 def play_round():
     global currentTurn, round_num
 
+    tokens, sender = wait_for_command("game state", dealer_socket)
+    if tokens[0] == "end":
+        print("#################################")
+        print(f" End of Game (Total Rounds: {round_num - 1})")
+        print("#################################")
+        print_cards(players_only=True)
+        print(f"The winner is {tokens[1]}!!!")
+        print("Player Scores:")
+        (scores, _) = tally_scores()
+        for user in scores.keys():
+            print(f"\t{user}: {scores[user]}")
+
+        return True
+
     print("#################################")
     print(f"     Round {round_num}")
     print("#################################")
-
-    tokens, sender = wait_for_command("game state", dealer_socket)
-    if tokens[0] == "end":
-        print(f"The winner is {tokens[1]}")
-        return True
 
     # tokens, sender = wait_for_command("pass stick", peer_socket)
     nextPlayer = players[0]
@@ -331,13 +343,20 @@ def wait_for_reveal_announcement(id):
         revelation_listener.start()
 
         # Allow user to reveal 2 cards
-        card1 = int_input("Choose the first card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+        # card1 = int_input("Choose the first card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+        card1 = random.randint(0, 5)
+        print(f"{username} selects {card1} to reveal.")
         reveal_card(card1)
 
-        card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+        # card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+        card2 = random.randint(0, 5)
+        print(f"{username} selects {card2} to reveal.")
+
         while card2 == card1:  # check that the user isn't trying to reveal the same card twice
             print("That card is already revealed, choose a different card to reveal.")
-            card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+            # card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
+            card2 = random.randint(0, 5)
+            print(f"{username} selects {card2} to reveal.")
         reveal_card(card2)
 
     print_cards()
@@ -365,7 +384,7 @@ def listen_for_revelations(id):
 # or we have stolen a card from another player.
 def pop_card():
     global held_card
-    valid_stacks = [1, 3]
+    valid_stacks = [1]
     print("------------Get Net Card---------------")
     print("Where do you want to draw a card from?")
     print("1. Stock")
@@ -374,21 +393,42 @@ def pop_card():
         print("2. Discard")
     else:
         print("2. (You cannot draw from the discard because it is empty.)")
-    print("3. Steal from another player")
 
-    selection = int_input("Selection: ", lambda x: x in valid_stacks)
+    if all(not card.hidden for card in cards[username]):
+        print("2. (You cannot steal from another player because you have no hidden cards.)")
+    else:
+        valid_stacks.append(3)
+        print("3. Steal from another player")
+
+    # selection = int_input("Selection: ", lambda x: x in valid_stacks)
+    # randomly choose one of the valid options
+    selection = random.choice(valid_stacks)
+    print(f"{username} decides to draw a card from the {selection}.")
+
     stack_type = "stock"
     if selection == 2:
         stack_type = "discard"
 
     if selection == 3:  # Steal a card from another player
-        steal_username = input_validator("From which user do you want to steal? ",
-                                         lambda x: x in map(lambda p: p.name, players) and x != username)
-        steal_card_index = int_input("Which card do you want to steal (must be revealed)? ",
-                                     lambda x: not cards[steal_username][x].hidden)
+        # steal_username = input_validator("From which user do you want to steal? ",
+        #                                  lambda x: x in map(lambda p: p.name, players) and x != username)
+        # choose a random username to steal from
+        steal_username = random.choice(list(filter(lambda player: player.name != username, players))).name
+        print(f"{username} decides to steal from {steal_username}")
+
+        # steal_card_index = int_input("Which card do you want to steal (must be revealed)? ",
+        #                              lambda x: not cards[steal_username][x].hidden)
+        # choose a random card of steal_username that is not hidden
+        steal_card_index = random.choice(list(filter(lambda x: not cards[steal_username][x].hidden, [*range(0, 6)])))
+        print(f"{username} decides to steal card {steal_card_index} from {steal_username}")
+
         temp_card = cards[steal_username][steal_card_index]
-        replace_card_index = int_input("Which card do you want to replace the stolen card with (must be hidden)? ",
-                                       lambda x: cards[username][x].hidden)
+        # replace_card_index = int_input("Which card do you want to replace the stolen card with (must be hidden)? ",
+        #                                lambda x: cards[username][x].hidden)
+        # choose one of my own cards that is hidden
+        replace_card_index = random.choice(list(filter(lambda x: cards[username][x].hidden, [*range(0, 6)])))
+        print(
+            f"{username} choose card {replace_card_index} to replace stolen card {steal_card_index} from {steal_username}")
 
         # Swap the stolen card with the card of our own we selected
         cards[username][replace_card_index].hidden = False
@@ -420,8 +460,23 @@ def replace_card():
     print("------------Swap Card---------------")
     print("Which of your cards do you want to replace?")
     print("Your selection should be between 0-5 (inclusive) or \'d\' for \'discard\'.")
-    card_index_str = input_validator("Selection: ", lambda x: x in ["d", "discard", "0", "1", "2", "3", "4", "5"])
-    if (card_index_str == "discard" or card_index_str == "d"):  # discard the card we are holding
+    #  Manual
+    # card_index_str = input_validator("Selection: ", lambda x: x in ["d", "discard", "0", "1", "2", "3", "4", "5"])
+
+    # Computer
+    # decide if we're going to discard or not
+    discard = random.choice([True, False])
+
+    card_index_str = "d"
+    if not discard:
+        # choose a random card between 0 and 5
+        card_index_str = str(random.randint(0, 5))
+        print(f"{username} decides to swap the held card with card {card_index_str}")
+    else:
+        print(f"{username} decides to discard the held card.")
+    # End computer
+
+    if card_index_str == "discard" or card_index_str == "d":  # discard the card we are holding
         card_index = 6
         held_card.hidden = False
         stacks["discard"].append(held_card)
@@ -438,27 +493,28 @@ def replace_card():
 
 
 # Print out the cards each user has, as well as the top card of the discard, and other elements of the GUI.
-def print_cards():
-    print("##############################")
-    print("----Stacks----")
-    for stack in stacks: # print the top card of each stack
-        print(f"{stack}:")
+def print_cards(players_only=False):
+    if not players_only:
+        print("##############################")
+        print("----Stacks----")
+        for stack in stacks:  # print the top card of each stack
+            print(f"{stack}:")
 
-        if len(stacks[stack]) > 0:
-            top_card = stacks[stack][-1].player_card_to_string()
-            print(top_card)
-        else:
-            print(
-                f"""┌─ ─ ─ ┐
+            if len(stacks[stack]) > 0:
+                top_card = stacks[stack][-1].player_card_to_string()
+                print(top_card)
+            else:
+                print(
+                    f"""┌─ ─ ─ ┐
   No   
 │Cards │
         
 └ ─ ─ ─┘""")
+        print("----Players----")
 
-    print("----Players----")
-    for player in cards: # print out every card that a player has
+    for player in cards:  # print out every card that a player has
         print(f"{player}:")
-        if currentTurn is not None and currentTurn.name == player:
+        if currentTurn is not None and currentTurn.name == player and not players_only:
             print("It's this player's turn. They are holding:")
             if held_card is not None:
                 held_card.hidden = False
@@ -487,6 +543,36 @@ def wait_for_initial_reveal_completion():
     dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
 
 
+# todo docs
+def tally_scores():
+    scores = {}
+    winner = ""
+    winner_score = 9999999  # players are competing for lowest score, so start with really high score for comparing
+    for player in cards:
+        player_sum = 0
+        # add up the value of all the player's cards
+        for card in cards[player]:
+            value = card.value[1:]
+            # Map special card values to their real value
+            if value == "A":  # Ace
+                value = 1
+            elif value == "J":  # Jack
+                value = 11
+            elif value == "Q":  # Queen
+                value = 12
+            elif value == "K":  # King
+                value = 13
+            else:  # If it's not a special card just use the face value
+                value = int(value)
+            player_sum += value
+        scores[player] = player_sum
+        if player_sum < winner_score:  # does this player have a better score than the current winner?
+            winner_score = player_sum
+            winner = player
+
+    return scores, winner
+
+
 # Checks at the end of each round whether all the cards have been revealed (which would indicate the end of the game)
 # Also tallies the score and determines a winner.
 # Run by the dealer.
@@ -508,34 +594,10 @@ def wait_for_game_completion(id):
         if cards_revealed == 6 * len(players):
             waiting_for_completion = False
 
-        # Tally the scores and determine who the winner is, or who is currently winning
-        scores = {}
-        winner = ""
-        winner_score = 9999999  # players are competing for lowest score, so start with really high score for comparing
-        for player in cards:
-            player_sum = 0
-            # add up the value of all the player's cards
-            for card in cards[player]:
-                value = card.value[1:]
-                # Map special card values to their real value
-                if value == "A":  # Ace
-                    value = 1
-                elif value == "J":  # Jack
-                    value = 11
-                elif value == "Q":  # Queen
-                    value = 12
-                elif value == "K":  # King
-                    value = 13
-                else:  # If it's not a special card just use the face value
-                    value = int(value)
-                player_sum += value
-            scores[player] = player_sum
-            if player_sum < winner_score:  # does this player have a better score than the current winner?
-                winner_score = player_sum
-                winner = player
+        (scores, winner) = tally_scores()
 
         response = "continue"
-        if not waiting_for_completion: # if all cards have been revealed, let everyone know the game is over
+        if not waiting_for_completion:  # if all cards have been revealed, let everyone know the game is over
             response = f"end\n{winner}"
 
         broadcast(f"game state\n{response}".encode(), game_state_socket, lambda x, y: x, True, 1)
@@ -547,14 +609,36 @@ def announce_initial_reveal():
     broadcast("announce initial reveal".encode(), dealer_socket)
 
 
+# Cut the deck of cards in half-ish, as if you were shuffling a real deck of cards.
+# Then, merge the two halves back together to form a new deck in a different order from the original.
+def cut_shuffle_deck(deck):
+    new_deck = []
+    midpoint = len(deck) / 2  # get the exact midpoint of the deck
+    cut_point = random.randint(midpoint - 15, midpoint + 15)  # cut the deck somewhere around the middle
+    halves = [deck[:cut_point], deck[cut_point:]]  # actually cut the deck array in half
+    turn = 0  # 0 = take card from halves[0], 1 = take card from halves[1]
+
+    # continually merge the two halves together until the whole deck is shuffled
+    while len(new_deck) < len(deck):
+        if len(halves[turn]) > 0:
+            new_deck.append(halves[turn].pop())
+        turn = int(not turn)
+
+    return new_deck
+
+
 # Generates a deck of cards, and shuffles them into a random order.
 # Invoked by the dealer at the start of every game.
-def shuffle_cards():
-    #  todo shuffle the deck of cards
+def generate_deck():
+    # generate the deck of cards
     all_cards = []
-    for suit in suits:
-        for value in values:
+    for suit in suits:  # create 4 suits
+        for value in values:  # create cards for each suit
             all_cards.append(Card(suit + value))
+
+    # shuffle the deck a couple of times to randomize the order
+    for i in range(random.randint(3, 7)):
+        all_cards = cut_shuffle_deck(all_cards)
 
     return all_cards
 
@@ -578,7 +662,7 @@ def deal_card(player, card):
 
 # Distributes the appropriate number of random cards in a deck to each player of the current game.
 def deal_cards():
-    all_cards = shuffle_cards()
+    all_cards = generate_deck()
     cards_dealt = 0
     while cards_dealt < len(players) * 6:
         player = players[cards_dealt % len(players)]
@@ -608,7 +692,7 @@ def reveal_card(src):
 def int_input(prompt_str, validator=lambda x: True):
     input_int = None
     input_valid = False
-    while not input_valid: # keep trying to collect the input until we get one that is valid
+    while not input_valid:  # keep trying to collect the input until we get one that is valid
         try:
             input_str = input(prompt_str)  # get the input from the user
             input_int = int(input_str)  # convert to int (may throw ValueError)
@@ -625,7 +709,7 @@ def int_input(prompt_str, validator=lambda x: True):
 # If validation fails, the function tries again with new input from the user until successful.
 def input_validator(prompt_str, validator=lambda x: True):
     input_valid = False
-    while not input_valid: # only return when we get a valid input
+    while not input_valid:  # only return when we get a valid input
         input_str = input(prompt_str)  # get input from user
         if validator(input_str):  # check if validation passes
             return input_str

@@ -54,12 +54,23 @@ class Card:
 
     @staticmethod
     def player_deck_to_string(deck):
-        result = ""
-        for i in range(len(deck)):
-            new_card_str = deck[i].player_card_to_string()
-            if (len(result) > 0):
-                result = Card.merge_lines(result, new_card_str)
-            else:
-                result = new_card_str
-        return result.replace(";n;", "\n")
+        final_result = ""
+        for r in [range(0, 3), range(3, 6)]:
+            header = ""
+            for i in r:
+                header += f"   {i}    "
+            header += "\n"
+
+            result = ""
+            for i in r:
+                new_card_str = deck[i].player_card_to_string()
+                if len(result) > 0:
+                    result = Card.merge_lines(result, new_card_str)
+                else:
+                    result = new_card_str
+            result.replace(";n;", "\n")
+            result = header + result
+            final_result += result
+
+        return final_result
 

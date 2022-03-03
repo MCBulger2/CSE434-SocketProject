@@ -14,7 +14,7 @@ import manager
 #   -v or --verbose: whether a client or manager, log more information to the console -- TODO
 def main(argv):
     # Set up the logger with the proper format and level of verbosity
-    logging.basicConfig(stream=sys.stdout, encoding='utf-8', level=logging.DEBUG)
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
     try:
         # Attempt to parse the command line arguments
@@ -30,7 +30,10 @@ def main(argv):
             manager.start_manager()
             return
         if opt == "-q":
-            client.query_manager()
+            try:
+                client.query_manager()
+            except KeyboardInterrupt:
+            	print("Shutting down the client...")
             return
 
     # If not a manager, start up as a client process
