@@ -4,7 +4,7 @@ For all of the below requests and responses, a value in angle brackets ("<>") in
 Format of Messages
 
 Register Player:
-register <username> <port>
+-register <username> <port>
     SUCCESS
         User was successfully registered
     FAILURE <error>
@@ -13,7 +13,7 @@ register <username> <port>
             "USERNAME" - the <username> is already taken
 
 Query Registered Players:
-query players
+-query players
     <num_players><players>
 
     Players is a list of <player> separated by newlines, where a <player>
@@ -26,7 +26,7 @@ start game <username> <k>
     SUCCESS\n<gameId>\n<players>
 
 Query ongoing games:
-query games
+-query games
     <num_games><games>
     Games is a list of <game> separated by newlines, where a <game>
     represents a game in the format:
@@ -41,7 +41,7 @@ end <gameId> <username>
     FAILURE
 
 De-register:
-deregister or de-register
+-deregister or de-register
     SUCCESS
     FAILURE
 

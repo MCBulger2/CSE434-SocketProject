@@ -1,5 +1,10 @@
 #!/usr/bin/python
 
+# Matthew Bulger
+# CSE 434
+# Dr. Syrotiuk
+# Socket Project
+
 import getopt
 import sys
 import logging

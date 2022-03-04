@@ -1,3 +1,7 @@
+# Matthew Bulger
+# CSE 434
+# Dr. Syrotiuk
+# Socket Project
 
 import math
 

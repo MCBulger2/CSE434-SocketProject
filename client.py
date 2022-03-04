@@ -1,3 +1,8 @@
+# Matthew Bulger
+# CSE 434
+# Dr. Syrotiuk
+# Socket Project
+
 import random
 import time
 from socket import *
@@ -12,7 +17,7 @@ values = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]  # a
 suits = ["S", "C", "D", "H"]  # all possible card suits (Spades, Clubs, Diamonds, Hearts)
 
 # Global Variables for Client
-serverName = 'localhost'  # static, permanent IP of the manager process
+serverName = '172.17.2.18'  # static, permanent IP of the manager process
 serverPort = 4500  # static, permanent port of the manager process
 clientPort = 4505  # by default a client has port 4505. as ports are allocated each client will get a higher port
 portsPerClient = 5  # the number of ports a client is allocated. i.e., the size of port blocks being allocated
@@ -36,8 +41,8 @@ held_card = None  # the card being "held" by the current user (card involved wit
 round_num = 1  # the current turn of the round
 turn_num = 1  # the current turn of the round
 gameId = -1  # the game id assigned by the manager. This value is only used by the dealer to end the game
-play_with_extension = False
-pause = False
+play_with_extension = False  # if true, the player extension is enabled (can steal cards back and forth)
+pause = False  # if true, execution will pause at the beginning of each round
 
 
 # Entry point for a Client Process - Starts the client.
@@ -81,7 +86,7 @@ def start_client(should_pause) -> None:
         print("------------------------------------------")
         print("Options:")
         print("1: Start a new game")
-        print("2: Join matchmaking (normal rules)")
+        print("2: Join matchmaking")
         # print("3: Join matchmaking (special rules)")
         print("3: Query Manager")
         print("4: De-register and Exit")
@@ -93,7 +98,7 @@ def start_client(should_pause) -> None:
             play_with_extension_input = input_validator("Would you like to play 'W'ith or with'O'ut the player extension (stealing)? (Enter W or O): ",
                                     lambda x: x.lower() == "w" or x.lower() == "o")
             extension = False
-            if play_with_extension_input == "w":
+            if play_with_extension_input.lower() == "w":
                 extension = True
             request_start_game(num_players, extension)
         elif selection == 2:  # normal matchmaking
@@ -216,7 +221,7 @@ def request_start_game(num_players, extension):
         dealer_player_thread = threading.Thread(target=matchmaking, args=(1,))
         dealer_player_thread.start()
 
-        assign_players(play_with_extension)  # notify all the other players that the game is starting
+        assign_players(extension)  # notify all the other players that the game is starting
 
         continue_game = True
         while continue_game:
@@ -287,7 +292,7 @@ def wait_for_cards(id):
         while i < len(players) * 6:
             tokens, sender = wait_for_command("deal card", peer_socket)
             card = Card.from_string(tokens[0])
-            card.hidden = True # todo maybe don't need this
+            card.hidden = True
             cards[tokens[1]].append(card)  # deal the card to the player it was assigned to
             i += 1
 
@@ -314,7 +319,7 @@ def play_round():
     global currentTurn, turn_num, round_num
 
     tokens, sender = wait_for_command("game state", dealer_socket)
-    if tokens[0] == "newround":
+    if tokens[0] == "newround": # the last round just ended, starting a new round
         print("#################################")
         print(f" End of Round {round_num}")
         print("#################################")
@@ -326,7 +331,7 @@ def play_round():
         round_num += 1
         turn_num = 1
         return True, False
-    elif tokens[0] == "end":
+    elif tokens[0] == "end":  # End of the entire game, all rounds complete
         print("#################################")
         print(f" End of Game (Total Rounds: {round_num})")
         print("#################################")
@@ -339,17 +344,19 @@ def play_round():
         round_num += 1
         return True, True
 
+    # if we reach here, the round is not over yet, keep playing
     print("#################################")
     print(f"  Round {round_num} - Turn {turn_num}")
     print("#################################")
 
+    # if we run out of cards in the stockpile, turn the discard pile over and use it instead
     if len(stacks["stock"]) == 0:
         stacks["stock"] = list(reversed(stacks["discard"]))
         for card in stacks["stock"]:
             card.hidden = True
         stacks["discard"] = []
 
-    # tokens, sender = wait_for_command("pass stick", peer_socket)
+    # figure out whose turn it is
     next_player = players[0]
     currentTurn = next_player
     del players[0]
@@ -371,14 +378,17 @@ def play_round():
     turn_num += 1
     return False, False
 
-
+# it is currently not the player's turn to move, waits for another player to make their move
 def listen_for_move():
     global held_card
 
+    # wait for a move from one of the players
     tokens, sender = wait_for_command("pop", peer_socket)
     stack_type = tokens[0]
 
-    if stack_type == "steal":
+    # parse the move they made and replicate it
+
+    if stack_type == "steal":  # player chose to steal a card
         temp_card = cards[tokens[1]][int(tokens[2])]
         cards[tokens[3]][int(tokens[4])].hidden = False
         cards[tokens[1]][int(tokens[2])] = cards[tokens[3]][int(tokens[4])]
@@ -390,11 +400,14 @@ def listen_for_move():
 
     print_cards()
 
+    # player drew from either stockpile or discard
     tokens, sender = wait_for_command("replace", peer_socket)
     if tokens[0] == "discard" or tokens[0] == "d":
         held_card.hidden = False
         stacks["discard"].append(held_card)
+        print(f"Received move from {username}: Discard {held_card.value} ")
     else:
+        # swap the held card with the specified card
         swapped_card_index = int(tokens[0])
         user = tokens[1]
         swapped_card = cards[user][swapped_card_index]
@@ -421,17 +434,20 @@ def wait_for_reveal_announcement(id):
         # Allow user to reveal 2 cards
         # card1 = int_input("Choose the first card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
         card1 = random.randint(0, 5)
+        time.sleep(0.025)
         print(f"{username} selects {card1} to reveal.")
         reveal_card(card1)
 
         # card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
         card2 = random.randint(0, 5)
+        time.sleep(0.025)
         print(f"{username} selects {card2} to reveal.")
 
         while card2 == card1:  # check that the user isn't trying to reveal the same card twice
             print("That card is already revealed, choose a different card to reveal.")
             # card2 = int_input("Choose the second card to reveal (between 0-5 inclusive): ", lambda x: 0 <= x <= 5)
             card2 = random.randint(0, 5)
+            time.sleep(0.025)
             print(f"{username} selects {card2} to reveal.")
         reveal_card(card2)
 
@@ -481,6 +497,7 @@ def pop_card():
     # selection = int_input("Selection: ", lambda x: x in valid_stacks)
     # randomly choose one of the valid options
     selection = random.choice(valid_stacks)
+    time.sleep(0.025)
     print(f"{username} decides to draw a card from the {selection}.")
 
     stack_type = "stock"
@@ -492,12 +509,14 @@ def pop_card():
         #                                  lambda x: x in map(lambda p: p.name, players) and x != username)
         # choose a random username to steal from
         steal_username = random.choice(list(filter(lambda player: player.name != username, players))).name
+        time.sleep(0.025)
         print(f"{username} decides to steal from {steal_username}")
 
         # steal_card_index = int_input("Which card do you want to steal (must be revealed)? ",
         #                              lambda x: not cards[steal_username][x].hidden)
         # choose a random card of steal_username that is not hidden
         steal_card_index = random.choice(list(filter(lambda x: not cards[steal_username][x].hidden, [*range(0, 6)])))
+        time.sleep(0.025)
         print(f"{username} decides to steal card {steal_card_index} from {steal_username}")
 
         temp_card = cards[steal_username][steal_card_index]
@@ -505,6 +524,7 @@ def pop_card():
         #                                lambda x: cards[username][x].hidden)
         # choose one of my own cards that is hidden
         replace_card_index = random.choice(list(filter(lambda x: cards[username][x].hidden, [*range(0, 6)])))
+        time.sleep(0.025)
         print(
             f"{username} choose card {replace_card_index} to replace stolen card {steal_card_index} from {steal_username}")
 
@@ -544,11 +564,13 @@ def replace_card():
     # Computer
     # decide if we're going to discard or not
     discard = random.choice([True, False])
+    time.sleep(0.025)
 
     card_index_str = "d"
     if not discard:
         # choose a random card between 0 and 5
         card_index_str = str(random.randint(0, 5))
+        time.sleep(0.025)
         print(f"{username} decides to swap the held card with card {card_index_str}")
     else:
         print(f"{username} decides to discard the held card.")
@@ -620,6 +642,8 @@ def wait_for_initial_reveal_completion():
     # Normally this is done by the player whose turn it is, but since its no one's turn yet, the dealer must do it
     dealer_socket.sendto("query game state".encode(), (dealer_address[0], dealer_address[1] + 1))
 
+
+# determines the score of a single card based on the card's value
 def score_card(card):
     value = card.value[1:]
     # Map special card values to their real value
@@ -635,7 +659,8 @@ def score_card(card):
         value = int(value)
     return value
 
-# todo docs
+
+# tally up the scores for all players and determine who is currently winning
 def tally_scores():
     scores = {}
     winner = ""
@@ -647,7 +672,7 @@ def tally_scores():
             top_card_value = cards[player][i].value[1:]
             bottom_card_value = cards[player][i + 3].value[1:]
             # If two cards in the same column match, add both of their values to the correction
-            if top_card_value == bottom_card_value: # todo maybe this needs to check by value so jack can match with queen
+            if top_card_value == bottom_card_value:
                 correction += score_card(cards[player][i]) + score_card(cards[player][i + 3])
 
         # add up the value of all the player's cards
@@ -738,13 +763,13 @@ def generate_deck():
 
 
 # Called by the dealer to notify the other players of the game that they have been assigned to a new game
-def assign_players(play_with_extension):
+def assign_players(extension):
     # Generate the string that consists of a list of all the players
     players_str = ""
     for player in players:
         players_str += f"\n{player.to_string()}"
 
-    message = f"assign player\n{play_with_extension}\n{len(players)}{players_str}".encode()
+    message = f"assign player\n{extension}\n{len(players)}{players_str}".encode()
     broadcast(message, dealer_socket)
 
 

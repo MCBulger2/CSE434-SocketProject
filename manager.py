@@ -1,3 +1,8 @@
+# Matthew Bulger
+# CSE 434
+# Dr. Syrotiuk
+# Socket Project
+
 import string
 from socket import *
 import logging
@@ -39,6 +44,7 @@ def start_manager() -> None:
     manager_socket.close()
 
 
+# Get an incoming message from the socket and handle the request
 def handle_next_request():
     global manager_socket
 
@@ -176,16 +182,16 @@ def end(game_id_str, user) -> string:
 # be unable to communicate with them and unable to make progress.
 # Can only be invoked by a client who is not currently in an ongoing game.
 def deregister(username):
-    # todo check that the user is not in an ongoing game
-
+    # Get the index of the user with the specified username
     idx = -1
     for i in range(len(players)):
         if players[i].name == username:
             idx = i
             break
 
+    # Delete the user so they cannot join any more games
     if idx != -1:
         del players[idx]
         return "SUCCESS"
 
-    return "FAILURE"
+    return "FAILURE"  # could not find user
